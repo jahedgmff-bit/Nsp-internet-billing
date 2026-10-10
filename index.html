@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Internet Billing Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0}header{background:#12213d;color:#fff;padding:18px 16px}header h1{font-size:21px;margin:0 0 5px}header p{margin:0;color:#cbd5e1;font-size:13px}
+main{max-width:1000px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px #0f172a08}
+h2{font-size:18px;margin:0 0 12px}h3{font-size:15px;margin:14px 0 8px}label{display:block;font-size:13px;font-weight:650;margin:10px 0 5px}
+input,select,button{font:inherit}input,select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;background:#fff}
+button{padding:11px 14px;border:0;border-radius:9px;background:#1769e0;color:white;font-weight:700;cursor:pointer;margin-top:10px}
+button.secondary{background:#475569}button.danger{background:#b42318}button.good{background:#16803c}button:disabled{opacity:.55}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.hidden{display:none!important}.muted{color:#64748b;font-size:13px}.notice{padding:10px 12px;border-radius:9px;background:#eff6ff;color:#1d4ed8;margin:10px 0;font-size:13px;white-space:pre-wrap}.error{background:#fff1f2;color:#be123c}.success{background:#ecfdf5;color:#166534}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:9px;border-bottom:1px solid #e2e8f0;vertical-align:top}th{background:#f8fafc}.tablewrap{overflow-x:auto}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#fef3c7;color:#92400e;font-size:12px}.pill.Approved{background:#dcfce7;color:#166534}.pill.Rejected{background:#fee2e2;color:#991b1b}
+.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{margin:0;padding:7px 9px;font-size:12px}.stat{font-size:24px;font-weight:800}.smallbtn{font-size:12px;padding:7px 9px}
+footer{padding:18px;text-align:center;color:#64748b;font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>Internet Billing — Admin</h1><p>Customer, monthly bill ও payment management</p></header>
+<main>
+<section id="config" class="card">
+<h2>১) Supabase সংযোগ</h2>
+<p class="muted">Supabase → Project Settings → API থেকে Project URL ও publishable/anon key বসাও। service_role/secret key কখনো এখানে দেবে না।</p>
+<label>Project URL</label><input id="url" placeholder="https://your-project.supabase.co" autocomplete="url">
+<label>Publishable key / anon public key</label><input id="key" placeholder="sb_publishable_... অথবা পুরোনো anon key" autocomplete="off">
+<button id="connectBtn">Connect</button>
+<div id="configMsg" class="notice">Supabase URL ও public key বসিয়ে Connect চাপো।</div>
+</section>
+
+<section id="login" class="card hidden">
+<h2>২) Admin Login</h2>
+<label>Admin email</label><input id="email" type="email" placeholder="admin@example.com" autocomplete="username">
+<label>Password</label><input id="password" type="password" placeholder="Supabase Auth password" autocomplete="current-password">
+<button id="loginBtn">Login</button>
+<div id="loginMsg" class="notice">শুধু আগে থেকে তৈরি করা Admin User দিয়ে লগইন করো।</div>
+</section>
+
+<section id="app" class="hidden">
+<div class="card">
+<div class="grid">
+<div><div class="muted">মোট কাস্টমার</div><div id="customerCount" class="stat">0</div></div>
+<div><div class="muted">Pending payment</div><div id="pendingCount" class="stat">0</div></div>
+<div><div class="muted">Approved payment (৳)</div><div id="approvedTotal" class="stat">0</div></div>
+</div>
+<div class="actions"><button id="refreshBtn" class="secondary">Refresh data</button><button id="logoutBtn" class="danger">Logout</button></div>
+<div id="appMsg" class="notice">লগইন সফল হলে এখান থেকে কাজ করতে পারবে।</div>
+</div>
+
+<div class="card">
+<h2>নতুন Customer যোগ করো</h2>
+<div class="grid">
+<div><label>Customer name *</label><input id="cname" placeholder="jahed"></div>
+<div><label>Phone *</label><input id="phone" placeholder="01XXXXXXXXX" inputmode="tel"></div>
+<div><label>Monthly bill (৳) *</label><input id="bill" type="number" min="0" value="500"></div>
+<div><label>Billing month *</label><input id="month" value="October 2026"></div>
+</div>
+<button id="addCustomerBtn">Add Customer</button>
+</div>
+
+<div class="card">
+<h2>Customer list</h2><div class="tablewrap"><table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Monthly bill</th><th>Month</th></tr></thead><tbody id="customersBody"><tr><td colspan="5">কোনো ডেটা লোড হয়নি।</td></tr></tbody></table></div>
+</div>
+
+<div class="card">
+<h2>Payment যোগ করো</h2>
+<p class="muted">কাস্টমারের পেমেন্টের তথ্য এন্ট্রি করলে status Pending হবে। Approve/Reject শুধু Admin করবে।</p>
+<div class="grid">
+<div><label>Customer *</label><select id="paymentCustomer"><option value="">আগে Customer যোগ/লোড করো</option></select></div>
+<div><label>Amount (৳) *</label><input id="paymentAmount" type="number" min="1" placeholder="500"></div>
+<div><label>Billing month *</label><input id="paymentMonth" value="October 2026"></div>
+</div>
+<button id="addPaymentBtn">Add Pending Payment</button>
+</div>
+
+<div class="card">
+<h2>Payment management</h2>
+<div class="tablewrap"><table><thead><tr><th>ID</th><th>Customer</th><th>Amount</th><th>Month</th><th>Status</th><th>Action</th></tr></thead><tbody id="paymentsBody"><tr><td colspan="6">কোনো ডেটা লোড হয়নি।</td></tr></tbody></table></div>
+</div>
+</section>
+</main>
+<footer>Private admin tool • Supabase RLS policies অবশ্যই সেট করতে হবে</footer>
+<script>
+(() => {
+ const $ = id => document.getElementById(id);
+ let client = null;
+ let customers = [];
+ let payments = [];
+ const savedUrl = localStorage.getItem('ib_supabase_url');
+ const savedKey = localStorage.getItem('ib_supabase_key');
+ if(savedUrl) $('url').value = savedUrl;
+ if(savedKey) $('key').value = savedKey;
+ function msg(id, text, type='') {
+   const el=$(id); el.textContent=text; el.className='notice'+(type?' '+type:'');
+ }
+ function esc(v){return String(v ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+ function money(v){return '৳'+Number(v||0).toLocaleString('en-BD',{maximumFractionDigits:2});}
+ function showApp(){ $('config').classList.add('hidden'); $('login').classList.add('hidden'); $('app').classList.remove('hidden'); }
+ function showLogin(){ $('config').classList.add('hidden'); $('login').classList.remove('hidden'); $('app').classList.add('hidden'); }
+ function showConfig(){ $('config').classList.remove('hidden'); $('login').classList.add('hidden'); $('app').classList.add('hidden'); }
+ async function connect(){
+   const url=$('url').value.trim(), key=$('key').value.trim();
+   if(!url || !key){msg('configMsg','Project URL এবং public key দুটোই দিতে হবে।','error');return;}
+   if(!/^https:\/\/.+/.test(url)){msg('configMsg','Project URL https:// দিয়ে শুরু হতে হবে।','error');return;}
+   try {
+     if(!window.supabase){msg('configMsg','Supabase library লোড হয়নি। ইন্টারনেট চালু করে পেজ reload করো।','error');return;}
+     client=window.supabase.createClient(url,key);
+     localStorage.setItem('ib_supabase_url',url); localStorage.setItem('ib_supabase_key',key);
+     const {data:{session},error}=await client.auth.getSession();
+     if(error) throw error;
+     msg('configMsg','Supabase সংযোগ তৈরি হয়েছে।','success');
+     if(session){showApp();await loadAll();} else showLogin();
+   } catch(e){msg('configMsg','Connect error: '+e.message,'error');}
+ }
+ async function login(){
+   if(!client){msg('loginMsg','আগে Supabase Connect করো।','error');return;}
+   const email=$('email').value.trim(), password=$('password').value;
+   if(!email||!password){msg('loginMsg','Email ও password দাও।','error');return;}
+   $('loginBtn').disabled=true;
+   try{
+     const {error}=await client.auth.signInWithPassword({email,password});
+     if(error) throw error;
+     msg('loginMsg','Login successful।','success');showApp();await loadAll();
+   }catch(e){msg('loginMsg','Login হয়নি: '+e.message,'error');}
+   finally{$('loginBtn').disabled=false;}
+ }
+ async function logout(){
+   if(client) await client.auth.signOut();
+   showLogin();msg('loginMsg','Logout হয়েছে।','success');
+ }
+ async function loadAll(){
+   if(!client)return;
+   msg('appMsg','ডেটা লোড হচ্ছে…');
+   try{
+     const [cr,pr]=await Promise.all([
+       client.from('customers').select('*').order('id',{ascending:false}),
+       client.from('payments').select('*').order('id',{ascending:false})
+     ]);
+     if(cr.error) throw new Error('customers: '+cr.error.message);
+     if(pr.error) throw new Error('payments: '+pr.error.message);
+     customers=cr.data||[]; payments=pr.data||[];
+     renderCustomers();renderPayments();renderStats();
+     msg('appMsg','ডেটা আপডেট হয়েছে।','success');
+   }catch(e){msg('appMsg','ডেটা লোড হয়নি: '+e.message+'\\nSupabase-এ grants/RLS policies ঠিক আছে কি না দেখো।','error');}
+ }
+ function renderCustomers(){
+   $('customersBody').innerHTML=customers.length?customers.map(c=>`<tr><td>${esc(c.id)}</td><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${money(c.monthly_bill)}</td><td>${esc(c.billing_month||'')}</td></tr>`).join(''):'<tr><td colspan="5">এখনো কোনো Customer নেই।</td></tr>';
+   $('paymentCustomer').innerHTML='<option value="">Customer বেছে নাও</option>'+customers.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.phone)}</option>`).join('');
+ }
+ function renderPayments(){
+   $('paymentsBody').innerHTML=payments.length?payments.map(p=>{
+     const status=String(p.status||'Pending');
+     const actions=status==='Pending'?`<div class="actions"><button class="good" data-action="Approved" data-id="${esc(p.id)}">Approve</button><button class="danger" data-action="Rejected" data-id="${esc(p.id)}">Reject</button></div>`:'—';
+     return `<tr><td>${esc(p.id)}</td><td>${esc(p.customer_name)}</td><td>${money(p.amount)}</td><td>${esc(p.billing_month)}</td><td><span class="pill ${esc(status)}">${esc(status)}</span></td><td>${actions}</td></tr>`;
+   }).join(''):'<tr><td colspan="6">এখনো কোনো Payment নেই।</td></tr>';
+ }
+ function renderStats(){
+   $('customerCount').textContent=customers.length;
+   $('pendingCount').textContent=payments.filter(p=>p.status==='Pending').length;
+   $('approvedTotal').textContent=money(payments.filter(p=>p.status==='Approved').reduce((sum,p)=>sum+Number(p.amount||0),0));
+ }
+ async function addCustomer(){
+   const name=$('cname').value.trim(), phone=$('phone').value.trim(), monthly_bill=Number($('bill').value), billing_month=$('month').value.trim();
+   if(!name||!phone||!billing_month||!Number.isFinite(monthly_bill)||monthly_bill<0){msg('appMsg','নাম, ফোন, সঠিক বিল এবং মাস পূরণ করো।','error');return;}
+   $('addCustomerBtn').disabled=true;
+   try{
+     const {error}=await client.from('customers').insert({name,phone,monthly_bill,billing_month});
+     if(error)throw error;
+     $('cname').value='';$('phone').value='';$('bill').value='500';
+     msg('appMsg','Customer সফলভাবে যোগ হয়েছে।','success');await loadAll();
+   }catch(e){msg('appMsg','Customer যোগ হয়নি: '+e.message,'error');}
+   finally{$('addCustomerBtn').disabled=false;}
+ }
+ async function addPayment(){
+   const customerId=$('paymentCustomer').value, amount=Number($('paymentAmount').value), billing_month=$('paymentMonth').value.trim();
+   const customer=customers.find(c=>String(c.id)===String(customerId));
+   if(!customer||!Number.isFinite(amount)||amount<=0||!billing_month){msg('appMsg','Customer, amount ও billing month সঠিকভাবে দাও।','error');return;}
+   $('addPaymentBtn').disabled=true;
+   try{
+     const payload={customer_id:customer.id,customer_name:customer.name,amount,billing_month,status:'Pending'};
+     const {error}=await client.from('payments').insert(payload);
+     if(error)throw error;
+     $('paymentAmount').value='';msg('appMsg','Payment Pending হিসেবে যোগ হয়েছে।','success');await loadAll();
+   }catch(e){msg('appMsg','Payment যোগ হয়নি: '+e.message,'error');}
+   finally{$('addPaymentBtn').disabled=false;}
+ }
+ async function updatePayment(id,status){
+   if(!['Approved','Rejected'].includes(status))return;
+   if(!confirm('এই payment-এর status '+status+' করতে চাও?'))return;
+   try{
+     const {error}=await client.from('payments').update({status}).eq('id',id).eq('status','Pending');
+     if(error)throw error;
+     msg('appMsg','Payment status update হয়েছে।','success');await loadAll();
+   }catch(e){msg('appMsg','Status update হয়নি: '+e.message,'error');}
+ }
+ $('connectBtn').addEventListener('click',connect);
+ $('loginBtn').addEventListener('click',login);
+ $('logoutBtn').addEventListener('click',logout);
+ $('refreshBtn').addEventListener('click',loadAll);
+ $('addCustomerBtn').addEventListener('click',addCustomer);
+ $('addPaymentBtn').addEventListener('click',addPayment);
+ $('paymentsBody').addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(b)updatePayment(b.dataset.id,b.dataset.action);});
+ if(savedUrl && savedKey) { /* User taps Connect after checking values */ }
+})();
+</script>
+</body>
+</html>
